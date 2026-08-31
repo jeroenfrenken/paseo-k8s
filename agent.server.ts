@@ -27,6 +27,8 @@ export interface ProviderCatalogueSlice {
   snapshot(options?: unknown): Promise<unknown>;
   listAvailable(options?: unknown): Promise<unknown>;
   listModels(provider: string, options?: unknown): Promise<unknown>;
+  /** Provider discovery is lazy; this resolves once it has run. */
+  waitForReady(options?: unknown): Promise<unknown>;
 }
 
 export interface PaseoAgentSlice {
@@ -64,16 +66,22 @@ interface WorkspaceLike {
 }
 
 /**
- * Observed shape of `providers.snapshot()`:
- *   { providers: [ { id, label, description, enabled, status, modes: [...] } ] }
- * and of `providers.listModels(id)`:
- *   { provider, models: [ { id, label, description, isDefault } ] }
+ * `providers.snapshot()` resolves to `{ cwd, entries, compactSnapshot }`, and an
+ * entry is:
+ *   { provider, status, enabled, source, error?, models?: [...], modes?: [...] }
+ *
+ * Note the id lives on `provider`, not `id`, and the models are already inline —
+ * reading `id` was why this only ever found Claude. `listModels()` stays as a
+ * fallback for entries that arrive without them.
  */
 interface ProviderLike {
+  provider?: string;
   id?: string;
   label?: string;
   enabled?: boolean;
   status?: string;
+  error?: string;
+  models?: ModelLike[];
 }
 
 interface ModelLike {
@@ -81,6 +89,7 @@ interface ModelLike {
   label?: string;
   description?: string;
   isDefault?: boolean;
+  isSelectable?: boolean;
 }
 
 export interface ProviderTarget {
@@ -149,61 +158,6 @@ const FALLBACK_PROVIDER: ProviderTarget = {
   models: [{ id: "claude-opus-5", label: "Opus 5", description: null, isDefault: true }],
 };
 
-/**
- * The real provider catalogue, so the picker offers every model the daemon can
- * actually run. An earlier version derived this from the providers already in
- * use on existing agents, which meant the list was usually just whatever was
- * running — normally Claude alone.
- */
-async function loadProviders(paseo: PaseoAgentSlice, errors: string[]): Promise<ProviderTarget[]> {
-  let raw: ProviderLike[] = [];
-  try {
-    raw = unwrap<ProviderLike>(await paseo.providers.snapshot(), "providers");
-    if (raw.length === 0) {
-      raw = unwrap<ProviderLike>(await paseo.providers.listAvailable(), "providers");
-    }
-  } catch (error) {
-    console.log(`[k8s] providers.snapshot() threw: ${(error as Error).message}`);
-  }
-
-  const usable = raw.filter(
-    (provider) => provider.id && provider.enabled !== false && provider.status !== "unavailable",
-  );
-  if (usable.length === 0) {
-    errors.push("No agent providers reported by the daemon; falling back to Claude.");
-    return [FALLBACK_PROVIDER];
-  }
-
-  const withModels = await Promise.all(
-    usable.map(async (provider): Promise<ProviderTarget> => {
-      const id = provider.id as string;
-      let models: ModelLike[] = [];
-      try {
-        models = unwrap<ModelLike>(await paseo.providers.listModels(id), "models");
-      } catch (error) {
-        console.log(`[k8s] providers.listModels(${id}) threw: ${(error as Error).message}`);
-      }
-      return {
-        id,
-        label: provider.label ?? id,
-        models: models
-          .filter((model) => typeof model.id === "string")
-          .map((model) => ({
-            id: model.id as string,
-            label: model.label ?? (model.id as string),
-            description: model.description ?? null,
-            isDefault: model.isDefault === true,
-          })),
-      };
-    }),
-  );
-
-  // A provider with no models cannot be launched into, so drop it rather than
-  // offering a dead entry.
-  const offerable = withModels.filter((provider) => provider.models.length > 0);
-  return offerable.length > 0 ? offerable : [FALLBACK_PROVIDER];
-}
-
 /** Compact description of an unknown payload, for diagnosing shape mismatches. */
 function describeShape(value: unknown): string {
   if (Array.isArray(value)) return `array(${value.length})`;
@@ -213,6 +167,102 @@ function describeShape(value: unknown): string {
   return `{${Object.keys(record)
     .map((key) => `${key}:${Array.isArray(record[key]) ? `array(${(record[key] as unknown[]).length})` : typeof record[key]}`)
     .join(", ")}}`;
+}
+
+/** Statuses that mean the provider cannot be launched into. */
+const DEAD_STATUSES = new Set(["unavailable", "disabled", "error"]);
+
+const PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "Copilot",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+  pi: "Pi",
+  omp: "Oh My Pi",
+};
+
+function providerLabel(id: string): string {
+  return (
+    PROVIDER_LABELS[id] ??
+    id
+      .split(/[-_]/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
+  );
+}
+
+function shapeModels(models: ModelLike[]): ProviderTarget["models"] {
+  return models
+    .filter((model) => typeof model.id === "string" && model.isSelectable !== false)
+    .map((model) => ({
+      id: model.id as string,
+      label: model.label ?? (model.id as string),
+      description: model.description ?? null,
+      isDefault: model.isDefault === true,
+    }));
+}
+
+/**
+ * The daemon's provider catalogue, so the picker offers every model it can
+ * actually run rather than whatever happened to be in use already.
+ */
+async function loadProviders(paseo: PaseoAgentSlice, errors: string[]): Promise<ProviderTarget[]> {
+  // Discovery is lazy: without this the snapshot can come back empty, or with
+  // every provider still marked unknown.
+  try {
+    await paseo.providers.waitForReady();
+  } catch {
+    // Older daemons may not expose it; the snapshot below still works.
+  }
+
+  let raw: ProviderLike[] = [];
+  try {
+    raw = unwrap<ProviderLike>(await paseo.providers.snapshot(), "entries");
+  } catch (error) {
+    console.log(`[k8s] providers.snapshot() threw: ${(error as Error).message}`);
+  }
+
+  const usable = raw.filter((entry) => {
+    const id = entry.provider ?? entry.id;
+    return Boolean(id) && entry.enabled !== false && !DEAD_STATUSES.has(entry.status ?? "");
+  });
+
+  if (usable.length === 0) {
+    const detail =
+      raw.length === 0
+        ? "providers.snapshot() returned no entries"
+        : `no usable provider among ${raw.length}: ${raw
+            .map((entry) => `${entry.provider ?? entry.id}=${entry.status ?? "?"}`)
+            .join(", ")}`;
+    console.log(`[k8s] ${detail}`);
+    errors.push(`Could not read the agent catalogue (${detail}); offering Claude only.`);
+    return [FALLBACK_PROVIDER];
+  }
+
+  const withModels = await Promise.all(
+    usable.map(async (entry): Promise<ProviderTarget> => {
+      const id = (entry.provider ?? entry.id) as string;
+      let models = shapeModels(entry.models ?? []);
+      if (models.length === 0) {
+        try {
+          models = shapeModels(unwrap<ModelLike>(await paseo.providers.listModels(id), "models"));
+        } catch (error) {
+          console.log(`[k8s] providers.listModels(${id}) threw: ${(error as Error).message}`);
+        }
+      }
+      return { id, label: entry.label ?? providerLabel(id), models };
+    }),
+  );
+
+  // A provider with no models cannot be launched into, so drop it rather than
+  // offering a dead entry.
+  const offerable = withModels.filter((provider) => provider.models.length > 0);
+  if (offerable.length === 0) {
+    errors.push("No provider reported any selectable model; offering Claude only.");
+    return [FALLBACK_PROVIDER];
+  }
+  return offerable;
 }
 
 export async function listAgentTargets(paseo: PaseoAgentSlice) {

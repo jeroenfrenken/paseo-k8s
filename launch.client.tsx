@@ -241,6 +241,10 @@ export function LaunchAgentPanel({
         {busy ? <ActivityIndicator color={tokens.muted} /> : null}
       </View>
 
+      {targetsError && projects.length > 0 ? (
+        <Text style={{ color: STATUS.warning, fontSize: 11 }}>▲ {targetsError}</Text>
+      ) : null}
+
       {result ? (
         <Text style={{ color: result.ok ? STATUS.good : STATUS.critical, fontSize: 11 }}>
           {result.ok ? "●" : "■"} {result.message}
