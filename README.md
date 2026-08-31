@@ -17,7 +17,23 @@ every view with its live count; `×` closes a tab. The **namespace dropdown** si
 the same line as the tabs, on the right, and is searchable.
 
 **First run** — with no cluster configured yet, the panel opens on a setup screen
-that lists any kubeconfig it discovered and links straight into Settings.
+that lists any kubeconfig it discovered, checks which command-line tools are
+installed, and links straight into Settings.
+
+## Command-line tools
+
+Nothing needs to be installed to browse a cluster: that path talks to the API
+server over HTTPS directly. The setup screen and **Settings → Command bar** both
+show what is present and what each one unlocks:
+
+| Tool | | Unlocks |
+|---|---|---|
+| `kubectl` | recommended | The command bar, and the Flux reconcile/suspend buttons |
+| `git` | optional | Comparing the deployed revision to a local Flux checkout |
+| `helm` | optional | Running helm from the command bar |
+| `flux` | optional | Nothing the panel needs — Flux state is read from the API. Only for running `flux` in the command bar |
+
+Missing tools show an install hint rather than blocking anything.
 
 **Settings** — its own screen with a sidebar:
 

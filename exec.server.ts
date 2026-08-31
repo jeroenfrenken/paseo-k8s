@@ -243,3 +243,79 @@ function firstLine(text: string): string | null {
   const line = text.split("\n").find((entry) => entry.trim() !== "");
   return line ? line.trim().slice(0, 120) : null;
 }
+
+
+/**
+ * Tools the panel can make use of, and what each one unlocks.
+ *
+ * Nothing here is needed to browse a cluster: that path talks to the API server
+ * over HTTPS directly. These only matter for the command bar, Flux actions and
+ * the GitOps comparison, so none is marked required.
+ */
+const TOOL_CHECKS: {
+  name: string;
+  requirement: "recommended" | "optional";
+  purpose: string;
+  hint: { darwin: string; other: string };
+}[] = [
+  {
+    name: "kubectl",
+    requirement: "recommended",
+    purpose: "The command bar, and the Flux reconcile and suspend buttons.",
+    hint: {
+      darwin: "brew install kubectl",
+      other: "See kubernetes.io/docs/tasks/tools, or download the static binary from dl.k8s.io",
+    },
+  },
+  {
+    name: "git",
+    requirement: "optional",
+    purpose: "Comparing the deployed revision against a local checkout of the GitOps repo.",
+    hint: { darwin: "brew install git", other: "Install git from your package manager" },
+  },
+  {
+    name: "helm",
+    requirement: "optional",
+    purpose: "Running helm from the command bar.",
+    hint: { darwin: "brew install helm", other: "See helm.sh/docs/intro/install" },
+  },
+  {
+    name: "flux",
+    requirement: "optional",
+    purpose:
+      "Not needed to see Flux state — the panel reads that from the API. Only for running flux from the command bar.",
+    hint: { darwin: "brew install fluxcd/tap/flux", other: "See fluxcd.io/flux/installation" },
+  },
+];
+
+export async function toolingReport() {
+  const darwin = process.platform === "darwin";
+  const tools = await Promise.all(
+    TOOL_CHECKS.map(async (check) => {
+      const binaryPath = resolveBinary(check.name);
+      return {
+        name: check.name,
+        path: binaryPath,
+        version: binaryPath ? await probeVersion(binaryPath) : null,
+        requirement: check.requirement,
+        purpose: check.purpose,
+        installHint: darwin ? check.hint.darwin : check.hint.other,
+      };
+    }),
+  );
+  return { tools };
+}
+
+function probeVersion(binaryPath: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(binaryPath, ["version", "--client"], { timeout: 5_000 }, (error, stdout) => {
+      if (!error && stdout.trim() !== "") {
+        resolve(firstLine(stdout));
+        return;
+      }
+      execFile(binaryPath, ["--version"], { timeout: 5_000 }, (fallbackError, fallbackOut) => {
+        resolve(fallbackError && !fallbackOut ? null : firstLine(fallbackOut));
+      });
+    });
+  });
+}

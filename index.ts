@@ -9,6 +9,7 @@ import {
   launchAgent,
   listAgentTargets,
   listNamespaces,
+  checkTooling,
   getToolingStatus,
   pointAtConfigFile,
   resetConfigPointer,
@@ -25,7 +26,7 @@ import {
 } from "./config.server";
 import { buildOverview, connectionFor, fetchNamespaces, fetchPodLogs, fetchVersion } from "./collect.server";
 import { expandHome, summarizeKubeconfig } from "./kubeconfig.server";
-import { runShellCommand, toolingStatus } from "./exec.server";
+import { runShellCommand, toolingReport, toolingStatus } from "./exec.server";
 import { buildFluxSnapshot, fluxAction } from "./flux.server";
 import { searchAttachments } from "./attach.server";
 import {
@@ -118,6 +119,8 @@ export default function contribute(plugin: PluginContext) {
   );
 
   plugin.handle(getToolingStatus, () => toolingStatus());
+
+  plugin.handle(checkTooling, () => toolingReport());
 
   plugin.handle(getFlux, ({ environmentId }) =>
     buildFluxSnapshot(environmentId, loadConfigState().fluxRepoPath),

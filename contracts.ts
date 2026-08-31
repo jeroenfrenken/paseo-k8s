@@ -445,6 +445,29 @@ export const runFluxAction = defineRpc({
   output: CommandResultSchema,
 });
 
+export const ToolReportSchema = z.object({
+  tools: z.array(
+    z.object({
+      name: z.string(),
+      path: z.string().nullable(),
+      version: z.string().nullable(),
+      /** How much the panel needs it. Nothing here is needed to browse. */
+      requirement: z.enum(["recommended", "optional"]),
+      /** What having it unlocks. */
+      purpose: z.string(),
+      /** Shown only when it is missing. */
+      installHint: z.string(),
+    }),
+  ),
+});
+export type ToolReport = z.infer<typeof ToolReportSchema>;
+
+export const checkTooling = defineRpc({
+  name: "k8s.tooling.report",
+  input: z.object({}),
+  output: ToolReportSchema,
+});
+
 export const getToolingStatus = defineRpc({
   name: "k8s.tooling.status",
   input: z.object({}),

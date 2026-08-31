@@ -3,7 +3,6 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin";
 import {
   checkConnection,
-  getToolingStatus,
   inspectKubeconfig,
   pointAtConfigFile,
   resetConfigPointer,
@@ -16,6 +15,7 @@ import {
 } from "./contracts";
 import { errorMessage, STATUS, withAlpha, type Tokens } from "./theme.client";
 import { Banner, Button, Dropdown, FieldRow, SectionLabel, TextField, Toggle } from "./ui.client";
+import { ToolChecklist } from "./chooser.client";
 
 type SectionId = "clusters" | "commands" | "gitops" | "storage";
 
@@ -272,7 +272,6 @@ export function SettingsScreen({
   const point = useRpc(pointAtConfigFile);
   const reset = useRpc(resetConfigPointer);
   const test = useRpc(checkConnection);
-  const tooling = useRpc(getToolingStatus);
 
   const [section, setSection] = useState<SectionId>("clusters");
   const [environments, setEnvironments] = useState<Environment[]>(config.environments);
@@ -281,7 +280,6 @@ export function SettingsScreen({
   const [pointerPath, setPointerPath] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, string>>({});
-  const [toolingLine, setToolingLine] = useState<string | null>(null);
 
   useEffect(() => {
     setEnvironments(config.environments);
@@ -289,20 +287,6 @@ export function SettingsScreen({
     setAllowlistText(config.settings.commandAllowlist.join(", "));
   }, [config]);
 
-  useEffect(() => {
-    let active = true;
-    tooling({})
-      .then((result) => {
-        if (!active) return;
-        setToolingLine(result.allowed.map((entry) => `${entry.name}: ${entry.path ?? "not found"}`).join("\n"));
-      })
-      .catch(() => {
-        if (active) setToolingLine(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [tooling, config.settings.commandAllowlist.join(",")]);
 
   const parsedAllowlist = allowlistText
     .split(/[,\s]+/)
@@ -528,11 +512,9 @@ export function SettingsScreen({
             />
           </FieldRow>
 
-          {toolingLine ? (
-            <FieldRow label="Found on this machine" tokens={tokens}>
-              <Text style={{ color: tokens.muted, fontSize: 11, fontFamily: tokens.mono }}>{toolingLine}</Text>
-            </FieldRow>
-          ) : null}
+          <FieldRow label="Command-line tools" tokens={tokens}>
+            <ToolChecklist tokens={tokens} />
+          </FieldRow>
         </>
       );
     }

@@ -1,5 +1,7 @@
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import type { Overview } from "./contracts";
+import { useRpc } from "@getpaseo/plugin";
+import { checkTooling, type Overview, type ToolReport } from "./contracts";
 import { STATUS, withAlpha, type Tokens } from "./theme.client";
 import { Button, SectionLabel } from "./ui.client";
 import { RESOURCE_GLYPHS, RESOURCE_LABELS, type ResourceKind } from "./list.client";
@@ -158,6 +160,82 @@ export function TabChooser({
   );
 }
 
+/**
+ * Which command-line tools are present. None is needed to browse a cluster —
+ * that path is plain HTTPS — so this reports what each one unlocks rather than
+ * blocking setup on any of them.
+ */
+export function ToolChecklist({ tokens }: { tokens: Tokens }) {
+  const load = useRpc(checkTooling);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  const [report, setReport] = useState<ToolReport | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    loadRef
+      .current({})
+      .then((result) => {
+        if (active) setReport(result);
+      })
+      .catch(() => {
+        if (active) setReport(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (!report) {
+    return <Text style={{ color: tokens.muted, fontSize: 11 }}>Checking installed tools…</Text>;
+  }
+
+  const missingRecommended = report.tools.filter(
+    (tool) => tool.path === null && tool.requirement === "recommended",
+  );
+
+  return (
+    <View style={{ gap: 10 }}>
+      {report.tools.map((tool) => {
+        const present = tool.path !== null;
+        const colour = present ? STATUS.good : tool.requirement === "recommended" ? STATUS.warning : tokens.muted;
+        return (
+          <View key={tool.name} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+            <Text style={{ color: colour, fontSize: 11, marginTop: 1 }}>{present ? "●" : "○"}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <Text style={{ color: tokens.ink, fontSize: 12, fontWeight: "600", fontFamily: tokens.mono }}>
+                  {tool.name}
+                </Text>
+                <Text style={{ color: tokens.muted, fontSize: 10 }}>
+                  {present ? "installed" : tool.requirement === "recommended" ? "recommended" : "optional"}
+                </Text>
+              </View>
+              <Text style={{ color: tokens.muted, fontSize: 11 }}>{tool.purpose}</Text>
+              {present ? (
+                tool.version ? (
+                  <Text style={{ color: tokens.muted, fontSize: 10, fontFamily: tokens.mono }} numberOfLines={1}>
+                    {tool.version}
+                  </Text>
+                ) : null
+              ) : (
+                <Text style={{ color: tokens.ink, fontSize: 10, fontFamily: tokens.mono }}>{tool.installHint}</Text>
+              )}
+            </View>
+          </View>
+        );
+      })}
+
+      <Text style={{ color: tokens.muted, fontSize: 11 }}>
+        {missingRecommended.length === 0
+          ? "● Everything the panel uses is available."
+          : "Browsing works without any of these — they only unlock the command bar and the GitOps comparison."}
+      </Text>
+    </View>
+  );
+}
+
 /** Shown the first time the panel runs, before any cluster is configured. */
 export function FirstRunScreen({
   discovered,
@@ -214,13 +292,26 @@ export function FirstRunScreen({
         />
       </View>
 
+      <View
+        style={{
+          borderWidth: 1,
+          borderColor: tokens.border,
+          borderRadius: 10,
+          padding: 16,
+          gap: 12,
+        }}
+      >
+        <SectionLabel text="Command-line tools" tokens={tokens} />
+        <ToolChecklist tokens={tokens} />
+      </View>
+
       <View style={{ gap: 6 }}>
         <SectionLabel text="What you get" tokens={tokens} />
         {[
           "Pods, Deployments, StatefulSets, DaemonSets, Nodes and Events with live CPU and memory",
           "Pod logs in a resizable dock, with follow and search",
           "A kubectl command bar with KUBECONFIG already set",
-          "Flux delivery state, if Flux is installed",
+          "Flux delivery state, when Flux is installed in the cluster (optional)",
           "Attach any resource — logs and all — to an agent prompt",
         ].map((line) => (
           <Text key={line} style={{ color: tokens.muted, fontSize: 12 }}>
