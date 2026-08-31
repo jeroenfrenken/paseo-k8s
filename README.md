@@ -1,8 +1,38 @@
 # Kubernetes panel (Paseo plugin)
 
 Adds a **Kubernetes** item to the Paseo sidebar — its own global surface, below the
-built-in items, not attached to a workspace or agent chat. It shows live workload
-health for two environments, **Staging** and **Production**.
+built-in items, not attached to a workspace or agent chat. Add as many clusters as
+you like and switch between them from the header.
+
+## Install
+
+```sh
+paseo plugin add jeroenfrenken/paseo-k8s
+```
+
+> Built and installed against **Paseo 0.7.0-beta.3**. `paseo plugin add` needs the
+> plugin system, which is still experimental — if the command is not there, update
+> Paseo to a 0.7.0 beta or newer.
+
+Or from a local clone:
+
+```sh
+git clone git@github.com:jeroenfrenken/paseo-k8s.git
+cd paseo-k8s && npm install
+paseo plugin install "$PWD"
+```
+
+Once installed, pick it up later with:
+
+```sh
+paseo plugin status k8s     # is there a newer commit?
+paseo plugin update k8s     # pull it in
+paseo plugin logs k8s       # what the plugin printed
+```
+
+Nothing is configured out of the box: on first run the panel offers any kubeconfig
+it discovers, checks which command-line tools are present, and takes you to
+Settings to add a cluster.
 
 ## What it shows
 
@@ -227,23 +257,6 @@ Everything the panel does is a read (`GET` only), including `pods/log`. Kubernet
 remains the authorization boundary; if the credential cannot list a resource the
 panel reports it under *Partial data* and shows the rest.
 
-## Install
-
-```sh
-paseo plugin add jeroenfrenken/paseo-k8s
-```
-
-Or from a local clone:
-
-```sh
-git clone git@github.com:jeroenfrenken/paseo-k8s.git
-cd paseo-k8s && npm install
-paseo plugin install "$PWD"
-```
-
-Nothing is configured out of the box: on first run the panel offers any kubeconfig
-it discovers, and clusters are added in Settings.
-
 ## Development
 
 ```sh
@@ -252,6 +265,10 @@ npm run check          # typecheck + client/server boundary
 paseo plugin reload k8s
 paseo plugin logs k8s
 ```
+
+`reload` picks up edits when the plugin was installed from a directory. If it was
+installed with `paseo plugin add`, it runs from a checkout under `~/.paseo/plugins`
+instead — commit, push, then `paseo plugin update k8s`.
 
 Layout:
 
