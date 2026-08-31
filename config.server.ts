@@ -101,11 +101,15 @@ export function readConfigFile(target: string): Environment[] | null {
 
   if (Array.isArray(doc.environments)) {
     for (const raw of doc.environments) push(raw);
-  } else {
-    // COMPAT: the first version keyed environments by name at the top level.
-    for (const legacyId of ["staging", "prod"]) {
-      if (doc[legacyId] !== undefined) push(doc[legacyId], legacyId);
-    }
+    // An explicit empty list means the user removed every cluster. Returning
+    // null here would send loadConfigState back to discovery and silently
+    // resurrect them, which looks exactly like "remove did nothing".
+    return environments;
+  }
+
+  // COMPAT: the first version keyed environments by name at the top level.
+  for (const legacyId of ["staging", "prod"]) {
+    if (doc[legacyId] !== undefined) push(doc[legacyId], legacyId);
   }
 
   return environments.length > 0 ? environments : null;
@@ -284,7 +288,7 @@ export function setConfigPointer(target: string): ConfigState {
   if (!existsSync(resolved)) throw new Error(`No ${CONFIG_FILENAME} in that directory.`);
 
   const environments = readConfigFile(resolved);
-  if (!environments) {
+  if (environments === null) {
     throw new Error(
       `${resolved} has no recognisable environments. Expected {"environments":[{"id":"staging","kubeconfig":"..."}]}.`,
     );

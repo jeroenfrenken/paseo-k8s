@@ -48,6 +48,7 @@ function ClusterEditor({
   const [contexts, setContexts] = useState<string[]>([]);
   const [currentContext, setCurrentContext] = useState<string | null>(null);
   const [inspectError, setInspectError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const path = environment.kubeconfig;
   useEffect(() => {
@@ -89,7 +90,14 @@ function ClusterEditor({
         <Text style={{ color: environment.isProduction ? STATUS.critical : STATUS.good, fontSize: 10 }}>●</Text>
         <Text style={{ color: tokens.ink, fontSize: 14, fontWeight: "600", flex: 1 }}>{environment.label}</Text>
         <Text style={{ color: tokens.muted, fontSize: 10, fontFamily: tokens.mono }}>{environment.id}</Text>
-        <Button label="Remove" tone="danger" tokens={tokens} onPress={onRemove} />
+        {confirming ? (
+          <>
+            <Button label="Really remove" tone="danger" tokens={tokens} onPress={onRemove} />
+            <Button label="Keep" tokens={tokens} onPress={() => setConfirming(false)} />
+          </>
+        ) : (
+          <Button label="Remove" tokens={tokens} onPress={() => setConfirming(true)} />
+        )}
       </View>
 
       <FieldRow label="Display name" tokens={tokens}>
@@ -301,28 +309,6 @@ export function SettingsScreen({
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
 
-  const addCluster = useCallback(() => {
-    setEnvironments((current) => {
-      const taken = current.map((entry) => entry.id);
-      const label = `Cluster ${current.length + 1}`;
-      return [
-        ...current,
-        {
-          id: slugifyEnvironmentId(label, taken),
-          label,
-          kubeconfig: "",
-          context: null,
-          namespace: null,
-          isProduction: false,
-        },
-      ];
-    });
-  }, []);
-
-  const removeCluster = useCallback((id: string) => {
-    setEnvironments((current) => current.filter((entry) => entry.id !== id));
-  }, []);
-
   const persist = useCallback(
     (next?: { environments?: Environment[]; settings?: Settings }) =>
       save({
@@ -330,6 +316,47 @@ export function SettingsScreen({
         settings: next?.settings ?? { ...settings, commandAllowlist: parsedAllowlist },
       }),
     [environments, settings, parsedAllowlist, save],
+  );
+
+  // Adding and removing a cluster writes immediately. Editing fields inside one
+  // still needs Save — but a list operation that only changed local state read
+  // as broken, because leaving the screen threw the change away.
+  const commitList = useCallback(
+    (nextEnvironments: Environment[], message: string) => {
+      setEnvironments(nextEnvironments);
+      persist({ environments: nextEnvironments })
+        .then((state) => {
+          onConfigChange(state);
+          setNotice(message);
+        })
+        .catch((error: unknown) => setNotice(errorMessage(error)));
+    },
+    [onConfigChange, persist],
+  );
+
+  const addCluster = useCallback(() => {
+    const taken = environments.map((entry) => entry.id);
+    const label = `Cluster ${environments.length + 1}`;
+    const created: Environment = {
+      id: slugifyEnvironmentId(label, taken),
+      label,
+      kubeconfig: "",
+      context: null,
+      namespace: null,
+      isProduction: false,
+    };
+    commitList([...environments, created], `Added ${created.label}. Give it a kubeconfig.`);
+  }, [environments, commitList]);
+
+  const removeCluster = useCallback(
+    (id: string) => {
+      const target = environments.find((entry) => entry.id === id);
+      commitList(
+        environments.filter((entry) => entry.id !== id),
+        `Removed ${target?.label ?? id}.`,
+      );
+    },
+    [environments, commitList],
   );
 
   const runTest = useCallback(
