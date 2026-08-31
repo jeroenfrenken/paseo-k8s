@@ -168,8 +168,10 @@ The agent is created inside that new workspace and tagged with labels
 `source=k8s-plugin`, `environment` and `resource`, so agents started this way are
 easy to find later.
 
-Model choices are the `provider/model` strings already in use on this daemon, which
-avoids guessing at the provider catalogue.
+The panel reads the daemon's provider catalogue, so **Agent** lists every provider
+that is enabled and available (Claude, Codex, OpenCode, Cursor, …) and **Model**
+lists that provider's models, with its default preselected. Providers that report
+no models are left out rather than offered as dead entries.
 
 ## Command bar
 

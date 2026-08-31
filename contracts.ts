@@ -252,8 +252,21 @@ export const AgentTargetsSchema = z.object({
       supportsWorktree: z.boolean(),
     }),
   ),
-  /** `provider/model` strings already in use on this daemon. */
-  providers: z.array(z.string()),
+  /** The daemon's provider catalogue, each with its selectable models. */
+  providers: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      models: z.array(
+        z.object({
+          id: z.string(),
+          label: z.string(),
+          description: z.string().nullable(),
+          isDefault: z.boolean(),
+        }),
+      ),
+    }),
+  ),
   error: z.string().nullable(),
 });
 

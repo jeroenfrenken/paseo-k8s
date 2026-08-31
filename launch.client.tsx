@@ -3,13 +3,32 @@ import { ActivityIndicator, ScrollView, Text, TextInput, View } from "react-nati
 import { useRpc } from "@getpaseo/plugin";
 import { launchAgent, listAgentTargets, type EnvironmentId } from "./contracts";
 import { errorMessage, STATUS, type Tokens } from "./theme.client";
-import { Button, Chip } from "./ui.client";
+import { Button, Chip, Dropdown } from "./ui.client";
+
+/** Prefer the provider's own default model, else its first. */
+function defaultModelOf(provider: { models: ModelTarget[] } | null): string | null {
+  if (!provider) return null;
+  return (provider.models.find((model) => model.isDefault) ?? provider.models[0])?.id ?? null;
+}
 
 interface ProjectTarget {
   id: string;
   name: string;
   rootPath: string;
   supportsWorktree: boolean;
+}
+
+interface ModelTarget {
+  id: string;
+  label: string;
+  description: string | null;
+  isDefault: boolean;
+}
+
+interface ProviderTarget {
+  id: string;
+  label: string;
+  models: ModelTarget[];
 }
 
 /**
@@ -37,10 +56,11 @@ export function LaunchAgentPanel({
   rpc.current = { loadTargets, launch };
 
   const [projects, setProjects] = useState<ProjectTarget[]>([]);
-  const [providers, setProviders] = useState<string[]>([]);
+  const [providers, setProviders] = useState<ProviderTarget[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [isolation, setIsolation] = useState<"worktree" | "directory">("worktree");
-  const [provider, setProvider] = useState<string | null>(null);
+  const [providerId, setProviderId] = useState<string | null>(null);
+  const [modelId, setModelId] = useState<string | null>(null);
   const [instruction, setInstruction] = useState(defaultInstruction);
   const [busy, setBusy] = useState(false);
   const [loadingTargets, setLoadingTargets] = useState(true);
@@ -56,7 +76,12 @@ export function LaunchAgentPanel({
         setProjects(targets.projects);
         setProviders(targets.providers);
         setProjectId((current) => current ?? targets.projects[0]?.id ?? null);
-        setProvider((current) => current ?? targets.providers[0] ?? null);
+        const firstProvider = targets.providers[0] ?? null;
+        setProviderId((current) => current ?? firstProvider?.id ?? null);
+        setModelId(
+          (current) =>
+            current ?? defaultModelOf(firstProvider),
+        );
         if (targets.error) setTargetsError(targets.error);
       })
       .catch((error: unknown) => {
@@ -70,17 +95,27 @@ export function LaunchAgentPanel({
     };
   }, []);
 
+  const provider = providers.find((entry) => entry.id === providerId) ?? null;
+  const models = provider?.models ?? [];
   const project = projects.find((entry) => entry.id === projectId) ?? null;
   // A non-git project cannot host a worktree; fall back without asking.
   const effectiveIsolation: "worktree" | "directory" =
     project && !project.supportsWorktree ? "directory" : isolation;
 
   function submit() {
-    if (!projectId || !provider || busy) return;
+    if (!projectId || !providerId || !modelId || busy) return;
     setBusy(true);
     setResult(null);
     rpc.current
-      .launch({ environmentId, resourceKey, projectId, isolation: effectiveIsolation, provider, instruction })
+      .launch({
+        environmentId,
+        resourceKey,
+        projectId,
+        isolation: effectiveIsolation,
+        // The daemon takes provider and model as one `provider/model` string.
+        provider: `${providerId}/${modelId}`,
+        instruction,
+      })
       .then((response) => setResult({ ok: response.ok, message: response.message }))
       .catch((error: unknown) => setResult({ ok: false, message: errorMessage(error) }))
       .finally(() => setBusy(false));
@@ -159,17 +194,40 @@ export function LaunchAgentPanel({
         </View>
       ) : null}
 
-      <Text style={{ color: tokens.muted, fontSize: 10 }}>Model</Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {providers.map((entry) => (
-          <Chip
-            key={entry}
-            label={entry}
-            selected={provider === entry}
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+        <View style={{ flexGrow: 1, flexBasis: 130, gap: 4 }}>
+          <Text style={{ color: tokens.muted, fontSize: 10 }}>Agent</Text>
+          <Dropdown
+            value={providerId}
+            options={providers.map((entry) => ({ value: entry.id, label: entry.label }))}
+            onSelect={(value) => {
+              setProviderId(value);
+              // Model ids are provider-specific, so re-pick when the agent changes.
+              setModelId(defaultModelOf(providers.find((entry) => entry.id === value) ?? null));
+            }}
             tokens={tokens}
-            onPress={() => setProvider(entry)}
+            title="Agent"
+            placeholder="Loading…"
+            minWidth={130}
           />
-        ))}
+        </View>
+        <View style={{ flexGrow: 2, flexBasis: 180, gap: 4 }}>
+          <Text style={{ color: tokens.muted, fontSize: 10 }}>Model</Text>
+          <Dropdown
+            value={modelId}
+            options={models.map((model) => ({
+              value: model.id,
+              label: model.isDefault ? `${model.label}  ·  default` : model.label,
+              detail: model.description ?? undefined,
+            }))}
+            onSelect={setModelId}
+            tokens={tokens}
+            title={provider ? `${provider.label} models` : "Model"}
+            placeholder={models.length === 0 ? "No models" : "Select a model"}
+            searchable={models.length > 8}
+            minWidth={180}
+          />
+        </View>
       </View>
 
       <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -177,7 +235,7 @@ export function LaunchAgentPanel({
           label="Launch agent"
           tone="primary"
           tokens={tokens}
-          disabled={busy || !projectId || !provider}
+          disabled={busy || !projectId || !providerId || !modelId}
           onPress={submit}
         />
         {busy ? <ActivityIndicator color={tokens.muted} /> : null}

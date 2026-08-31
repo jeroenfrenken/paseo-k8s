@@ -23,7 +23,14 @@ export interface WorkspaceHandleLike {
   agents: { create(options: AgentCreateOptions): Promise<{ id?: string } | string> };
 }
 
+export interface ProviderCatalogueSlice {
+  snapshot(options?: unknown): Promise<unknown>;
+  listAvailable(options?: unknown): Promise<unknown>;
+  listModels(provider: string, options?: unknown): Promise<unknown>;
+}
+
 export interface PaseoAgentSlice {
+  providers: ProviderCatalogueSlice;
   workspaces: {
     list(options?: unknown): Promise<unknown>;
     /** `source` follows the daemon's WorkspaceCreateRequest shape. */
@@ -56,9 +63,30 @@ interface WorkspaceLike {
   projectId?: string;
 }
 
-interface AgentLike {
-  provider?: string;
-  agent?: { provider?: string };
+/**
+ * Observed shape of `providers.snapshot()`:
+ *   { providers: [ { id, label, description, enabled, status, modes: [...] } ] }
+ * and of `providers.listModels(id)`:
+ *   { provider, models: [ { id, label, description, isDefault } ] }
+ */
+interface ProviderLike {
+  id?: string;
+  label?: string;
+  enabled?: boolean;
+  status?: string;
+}
+
+interface ModelLike {
+  id?: string;
+  label?: string;
+  description?: string;
+  isDefault?: boolean;
+}
+
+export interface ProviderTarget {
+  id: string;
+  label: string;
+  models: { id: string; label: string; description: string | null; isDefault: boolean }[];
 }
 
 interface ProjectLike {
@@ -115,7 +143,66 @@ function unwrap<T>(response: unknown, key: string): T[] {
   return [];
 }
 
-const FALLBACK_PROVIDER = "claude/claude-opus-5";
+const FALLBACK_PROVIDER: ProviderTarget = {
+  id: "claude",
+  label: "Claude",
+  models: [{ id: "claude-opus-5", label: "Opus 5", description: null, isDefault: true }],
+};
+
+/**
+ * The real provider catalogue, so the picker offers every model the daemon can
+ * actually run. An earlier version derived this from the providers already in
+ * use on existing agents, which meant the list was usually just whatever was
+ * running — normally Claude alone.
+ */
+async function loadProviders(paseo: PaseoAgentSlice, errors: string[]): Promise<ProviderTarget[]> {
+  let raw: ProviderLike[] = [];
+  try {
+    raw = unwrap<ProviderLike>(await paseo.providers.snapshot(), "providers");
+    if (raw.length === 0) {
+      raw = unwrap<ProviderLike>(await paseo.providers.listAvailable(), "providers");
+    }
+  } catch (error) {
+    console.log(`[k8s] providers.snapshot() threw: ${(error as Error).message}`);
+  }
+
+  const usable = raw.filter(
+    (provider) => provider.id && provider.enabled !== false && provider.status !== "unavailable",
+  );
+  if (usable.length === 0) {
+    errors.push("No agent providers reported by the daemon; falling back to Claude.");
+    return [FALLBACK_PROVIDER];
+  }
+
+  const withModels = await Promise.all(
+    usable.map(async (provider): Promise<ProviderTarget> => {
+      const id = provider.id as string;
+      let models: ModelLike[] = [];
+      try {
+        models = unwrap<ModelLike>(await paseo.providers.listModels(id), "models");
+      } catch (error) {
+        console.log(`[k8s] providers.listModels(${id}) threw: ${(error as Error).message}`);
+      }
+      return {
+        id,
+        label: provider.label ?? id,
+        models: models
+          .filter((model) => typeof model.id === "string")
+          .map((model) => ({
+            id: model.id as string,
+            label: model.label ?? (model.id as string),
+            description: model.description ?? null,
+            isDefault: model.isDefault === true,
+          })),
+      };
+    }),
+  );
+
+  // A provider with no models cannot be launched into, so drop it rather than
+  // offering a dead entry.
+  const offerable = withModels.filter((provider) => provider.models.length > 0);
+  return offerable.length > 0 ? offerable : [FALLBACK_PROVIDER];
+}
 
 /** Compact description of an unknown payload, for diagnosing shape mismatches. */
 function describeShape(value: unknown): string {
@@ -163,22 +250,7 @@ export async function listAgentTargets(paseo: PaseoAgentSlice) {
     errors.push(detail);
   }
 
-  // Providers already in use are guaranteed-valid `provider/model` strings,
-  // which beats guessing at the provider catalogue's shape.
-  let providers: string[] = [];
-  try {
-    const raw = unwrap<AgentLike>(await paseo.agents.list(), "agents");
-    providers = [
-      ...new Set(
-        raw
-          .map((entry) => entry.provider ?? entry.agent?.provider)
-          .filter((provider): provider is string => !!provider && provider.includes("/")),
-      ),
-    ];
-  } catch (error) {
-    console.log(`[k8s] agents.list() threw: ${(error as Error).message}`);
-  }
-  if (providers.length === 0) providers = [FALLBACK_PROVIDER];
+  const providers = await loadProviders(paseo, errors);
 
   return { projects, providers, error: errors.length > 0 ? errors.join(" · ") : null };
 }
