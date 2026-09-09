@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
-import type { ClusterConnection } from "./kubeconfig.server";
+import type { ClusterConnection } from "./kubeconfig";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 

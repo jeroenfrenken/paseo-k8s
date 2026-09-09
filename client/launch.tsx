@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, View } from "react-native";
-import { useRpc } from "@getpaseo/plugin";
-import { launchAgent, listAgentTargets, type EnvironmentId } from "./contracts";
-import { errorMessage, STATUS, type Tokens } from "./theme.client";
-import { Button, Chip, Dropdown } from "./ui.client";
+import { useRpc } from "@getpaseo/plugin/client";
+import { launchAgent, listAgentTargets, type EnvironmentId } from "../shared/contracts";
+import { errorMessage, STATUS, type Tokens } from "./theme";
+import { Button, Chip, Dropdown } from "./ui";
 
 /** Prefer the provider's own default model, else its first. */
 function defaultModelOf(provider: { models: ModelTarget[] } | null): string | null {

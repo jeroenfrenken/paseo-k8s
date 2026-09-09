@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useRpc } from "@getpaseo/plugin";
+import { useRpc } from "@getpaseo/plugin/client";
 import {
   checkConnection,
   inspectKubeconfig,
@@ -12,10 +12,10 @@ import {
   type EnvironmentId,
   slugifyEnvironmentId,
   type Settings,
-} from "./contracts";
-import { errorMessage, STATUS, withAlpha, type Tokens } from "./theme.client";
-import { Banner, Button, Dropdown, FieldRow, SectionLabel, TextField, Toggle } from "./ui.client";
-import { ToolChecklist } from "./chooser.client";
+} from "../shared/contracts";
+import { errorMessage, STATUS, withAlpha, type Tokens } from "./theme";
+import { Banner, Button, Dropdown, FieldRow, SectionLabel, TextField, Toggle } from "./ui";
+import { ToolChecklist } from "./chooser";
 
 type SectionId = "clusters" | "commands" | "gitops" | "storage";
 

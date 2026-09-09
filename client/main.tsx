@@ -1,4 +1,4 @@
-import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin";
+import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Pressable, ScrollView, Text, View } from "react-native";
 import {
@@ -9,7 +9,7 @@ import {
   type EnvironmentId,
   type Overview,
   type Pod,
-} from "./contracts";
+} from "../shared/contracts";
 import {
   errorMessage,
   formatAge,
@@ -19,16 +19,16 @@ import {
   tokensFor,
   withAlpha,
   type Tokens,
-} from "./theme.client";
-import { Banner, Button, Card, Dropdown, IconButton, Meter, SearchField, StatTile } from "./ui.client";
+} from "./theme";
+import { Banner, Button, Card, Dropdown, IconButton, Meter, SearchField, StatTile } from "./ui";
 import {
   buildTable,
   RESOURCE_GLYPHS,
   RESOURCE_LABELS,
   ResourceTable,
   type ResourceKind,
-} from "./list.client";
-import { DetailDrawer, resolveSelection } from "./detail.client";
+} from "./list";
+import { DetailDrawer, resolveSelection } from "./detail";
 import {
   DockResizer,
   DockTabStrip,
@@ -36,10 +36,10 @@ import {
   LogsTab,
   ShellTab,
   type DockTab,
-} from "./dock.client";
-import { SettingsScreen } from "./settings.client";
-import { FirstRunScreen, TabChooser } from "./chooser.client";
-import { FluxPane } from "./flux.client";
+} from "./dock";
+import { SettingsScreen } from "./settings";
+import { FirstRunScreen, TabChooser } from "./chooser";
+import { FluxPane } from "./flux";
 
 const REFRESH_INTERVAL_MS = 20_000;
 const DRAWER_WIDTH = 340;

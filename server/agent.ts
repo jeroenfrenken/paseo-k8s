@@ -1,6 +1,6 @@
-import type { EnvironmentId, Overview } from "./contracts";
-import { cachedOverview, podLogTail, podText, workloadText } from "./attach.server";
-import { formatNodeContext } from "./node-context.server";
+import type { EnvironmentId, Overview } from "../shared/contracts";
+import { cachedOverview, podLogTail, podText, workloadText } from "./attach";
+import { formatNodeContext } from "./node-context";
 
 /**
  * The slice of PaseoApi this plugin uses.

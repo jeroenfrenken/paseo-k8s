@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, PanResponder, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useRpc } from "@getpaseo/plugin";
+import { useRpc } from "@getpaseo/plugin/client";
 import {
   getPodLogs,
   getToolingStatus,
@@ -10,9 +10,9 @@ import {
   type EnvironmentId,
   type Pod,
   type PodLogs,
-} from "./contracts";
-import { clockTime, errorMessage, formatAge, STATUS, withAlpha, type Tokens } from "./theme.client";
-import { Button, Chip, IconButton, SearchField } from "./ui.client";
+} from "../shared/contracts";
+import { clockTime, errorMessage, formatAge, STATUS, withAlpha, type Tokens } from "./theme";
+import { Button, Chip, IconButton, SearchField } from "./ui";
 
 export type DockTab =
   | { id: string; kind: "logs"; pod: Pod; title: string }

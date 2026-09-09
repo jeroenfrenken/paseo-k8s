@@ -10,8 +10,8 @@ import {
   type Environment,
   type EnvironmentId,
   type Settings,
-} from "./contracts";
-import { expandHome } from "./kubeconfig.server";
+} from "../shared/contracts";
+import { expandHome } from "./kubeconfig";
 
 const CONFIG_FILENAME = "clusters.json";
 

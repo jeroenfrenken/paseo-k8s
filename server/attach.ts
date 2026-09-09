@@ -4,9 +4,9 @@ import {
   type Pod,
   type PluginAttachmentItemLike,
   type Workload,
-} from "./contracts";
-import { buildOverview, connectionFor, fetchPodLogs } from "./collect.server";
-import { listEnvironments } from "./config.server";
+} from "../shared/contracts";
+import { buildOverview, connectionFor, fetchPodLogs } from "./collect";
+import { listEnvironments } from "./config";
 
 const SNAPSHOT_TTL_MS = 20_000;
 const MAX_RESULTS = 10;

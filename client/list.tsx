@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import type { ClusterEvent, ClusterNode, Overview, Pod, Workload } from "./contracts";
+import type { ClusterEvent, ClusterNode, Overview, Pod, Workload } from "../shared/contracts";
 import {
   formatAge,
   formatCpu,
@@ -8,7 +8,7 @@ import {
   HEALTH_STYLE,
   STATUS,
   type Tokens,
-} from "./theme.client";
+} from "./theme";
 
 export type ResourceKind =
   | "overview"

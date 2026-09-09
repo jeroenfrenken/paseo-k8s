@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import type { ClusterEvent, ClusterNode, Overview, Pod, Workload } from "./contracts";
+import type { ClusterEvent, ClusterNode, Overview, Pod, Workload } from "../shared/contracts";
 import {
   formatAge,
   formatCpu,
@@ -9,10 +9,10 @@ import {
   shortImage,
   STATUS,
   type Tokens,
-} from "./theme.client";
-import { Button, Meter, StatTile } from "./ui.client";
-import { LaunchAgentPanel } from "./launch.client";
-import type { EnvironmentId } from "./contracts";
+} from "./theme";
+import { Button, Meter, StatTile } from "./ui";
+import { LaunchAgentPanel } from "./launch";
+import type { EnvironmentId } from "../shared/contracts";
 
 export type Selection =
   | { kind: "workload"; item: Workload }

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from "react-native";
-import { STATUS, withAlpha, type Tokens } from "./theme.client";
+import { STATUS, withAlpha, type Tokens } from "./theme";
 
 export function Card({ tokens, style, children }: { tokens: Tokens; style?: ViewStyle; children: ReactNode }) {
   return (

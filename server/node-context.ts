@@ -1,4 +1,4 @@
-import type { ClusterNode, Overview } from "./contracts";
+import type { ClusterNode, Overview } from "../shared/contracts";
 
 export function formatNodeContext(node: ClusterNode, overview: Overview): string {
   const pods = overview.pods.filter((pod) => pod.node === node.name);

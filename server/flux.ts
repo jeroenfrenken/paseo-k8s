@@ -2,11 +2,11 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { EnvironmentId, FluxKind, FluxResource, FluxSnapshot } from "./contracts";
-import { connectionFor } from "./collect.server";
-import { apiGet, type ListResponse, type ObjectMeta } from "./k8s-api.server";
-import { expandHome } from "./kubeconfig.server";
-import { resolveBinary, runShellCommand } from "./exec.server";
+import type { EnvironmentId, FluxKind, FluxResource, FluxSnapshot } from "../shared/contracts";
+import { connectionFor } from "./collect";
+import { apiGet, type ListResponse, type ObjectMeta } from "./k8s-api";
+import { expandHome } from "./kubeconfig";
+import { resolveBinary, runShellCommand } from "./exec";
 
 const LIST_LIMIT = 500;
 const GIT_TIMEOUT_MS = 10_000;

@@ -10,9 +10,10 @@ you like and switch between them from the header.
 paseo plugin add jeroenfrenken/paseo-k8s
 ```
 
-> Built and installed against **Paseo 0.7.0-beta.3**. `paseo plugin add` needs the
-> plugin system, which is still experimental — if the command is not there, update
-> Paseo to a 0.7.0 beta or newer.
+> **Requires Paseo >= 0.8.0.** v0.8 split plugins into separate client and server
+> runtime entries; this plugin is migrated to that layout and declares
+> `requirements.paseo` in its manifest, so an older Paseo will refuse to load it.
+> The last version that ran on 0.7.x is tagged `v0.7-final`.
 
 Or from a local clone:
 
@@ -276,30 +277,32 @@ Layout:
 
 | File | Runs on | Purpose |
 |---|---|---|
-| `index.ts` | both | entry point: RPC handlers (server) + surface/sidebar/command-center (app) |
-| `contracts.ts` | both | zod RPC contracts and shared types |
-| `config.server.ts` | daemon | clusters.json read/write, pointer file, kubeconfig discovery |
-| `kubeconfig.server.ts` | daemon | kubeconfig → connection (server, TLS material, credentials) |
-| `yaml.server.ts` | daemon | minimal YAML reader for the kubeconfig subset |
-| `k8s-api.server.ts` | daemon | HTTPS GET against the API server, resource types |
-| `collect.server.ts` | daemon | fetches and shapes the snapshot: workloads, pods, nodes, metrics, events |
-| `flux.server.ts` | daemon | Flux resources, the git comparison, and reconcile/suspend actions |
-| `attach.server.ts` | daemon | composer attachment search and the context bundles it returns |
-| `agent.server.ts` | daemon | workspace/model discovery and agent creation via PaseoApi |
-| `node-context.server.ts` | daemon | node context bundle |
-| `exec.server.ts` | daemon | the command runner behind the shell tab |
-| `main.client.tsx` | app | surface shell: header, tabs, split layout, dock |
-| `list.client.tsx` | app | sortable, searchable resource table |
-| `detail.client.tsx` | app | the detail drawer |
-| `flux.client.tsx` | app | the Flux tab |
-| `launch.client.tsx` | app | the "Ask an agent" panel |
-| `dock.client.tsx` | app | resizable dock, log tabs, shell tab |
-| `settings.client.tsx` | app | the Settings screen and its sidebar |
-| `chooser.client.tsx` | app | the `+` tab picker and the first-run screen |
-| `ui.client.tsx` | app | shared primitives (chips, buttons, tiles, meters, tabs) |
-| `theme.client.ts` | app | status palette, tokens, formatters |
+| `index.client.tsx` | app | client entry: surface, sidebar, attachment source, command-center items |
+| `index.server.ts` | daemon | server entry: every RPC handler |
+| `shared/contracts.ts` | both | zod RPC contracts and shared types |
+| `server/config.ts` | daemon | clusters.json read/write, pointer file, kubeconfig discovery |
+| `server/kubeconfig.ts` | daemon | kubeconfig → connection (server, TLS material, credentials) |
+| `server/yaml.ts` | daemon | minimal YAML reader for the kubeconfig subset |
+| `server/k8s-api.ts` | daemon | HTTPS GET against the API server, resource types |
+| `server/collect.ts` | daemon | fetches and shapes the snapshot: workloads, pods, nodes, metrics, events |
+| `server/flux.ts` | daemon | Flux resources, the git comparison, and reconcile/suspend actions |
+| `server/attach.ts` | daemon | composer attachment search and the context bundles it returns |
+| `server/agent.ts` | daemon | workspace/model discovery and agent creation via PaseoApi |
+| `server/node-context.ts` | daemon | node context bundle |
+| `server/exec.ts` | daemon | the command runner behind the shell tab |
+| `client/main.tsx` | app | surface shell: header, tabs, split layout, dock |
+| `client/list.tsx` | app | sortable, searchable resource table |
+| `client/detail.tsx` | app | the detail drawer |
+| `client/flux.tsx` | app | the Flux tab |
+| `client/launch.tsx` | app | the "Ask an agent" panel |
+| `client/dock.tsx` | app | resizable dock, log tabs, shell tab |
+| `client/settings.tsx` | app | the Settings screen and its sidebar |
+| `client/chooser.tsx` | app | the `+` tab picker and the first-run screen |
+| `client/ui.tsx` | app | shared primitives (chips, buttons, tiles, meters, tabs) |
+| `client/theme.ts` | app | status palette, tokens, formatters |
 
-**The `.server` / `.client` suffixes are load-bearing.** The daemon compiles `index.ts`
-twice — once per target — and refuses to pull a `.server` module into the app bundle
-or a `.client` module into the daemon bundle. Anything unsuffixed (`contracts.ts`)
-lands in both, so it must never import `node:` builtins.
+**The directories are load-bearing.** Paseo compiles the two entries separately and
+refuses to pull a `server/` module into the app bundle, a `client/` module into the
+daemon bundle, or any `node:` builtin into the app bundle. `shared/` lands in both,
+so it must never import `node:` builtins. `npm run check` enforces all of that
+locally, before the plugin is loaded.

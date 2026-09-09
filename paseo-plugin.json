@@ -1,3 +1,6 @@
 {
-  "id": "k8s"
+  "id": "k8s",
+  "requirements": {
+    "paseo": ">=0.8.0"
+  }
 }

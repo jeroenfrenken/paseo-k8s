@@ -1,5 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { Health } from "./contracts";
+import type { Health } from "../shared/contracts";
 
 /**
  * Status palette — fixed in both appearances, never themed, never reused for

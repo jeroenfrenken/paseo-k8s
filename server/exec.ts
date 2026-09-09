@@ -2,9 +2,9 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_ALLOWED_BINARIES, type CommandResult, type EnvironmentId } from "./contracts";
-import { loadConfigState, requireEnvironment } from "./config.server";
-import { expandHome, loadConnection } from "./kubeconfig.server";
+import { DEFAULT_ALLOWED_BINARIES, type CommandResult, type EnvironmentId } from "../shared/contracts";
+import { loadConfigState, requireEnvironment } from "./config";
+import { expandHome, loadConnection } from "./kubeconfig";
 
 const OUTPUT_LIMIT = 400_000;
 

@@ -6,8 +6,8 @@ import {
   type Overview,
   type Pod,
   type Workload,
-} from "./contracts";
-import { loadConnection, type ClusterConnection } from "./kubeconfig.server";
+} from "../shared/contracts";
+import { loadConnection, type ClusterConnection } from "./kubeconfig";
 import {
   ApiError,
   apiGet,
@@ -20,9 +20,9 @@ import {
   type PodResource,
   type VersionResponse,
   type WorkloadResource,
-} from "./k8s-api.server";
-import { requireEnvironment } from "./config.server";
-import type { PodLogs } from "./contracts";
+} from "./k8s-api";
+import { requireEnvironment } from "./config";
+import type { PodLogs } from "../shared/contracts";
 
 const LIST_LIMIT = 500;
 const EVENT_LIMIT = 40;

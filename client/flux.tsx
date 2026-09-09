@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
-import { useRpc } from "@getpaseo/plugin";
+import { useRpc } from "@getpaseo/plugin/client";
 import {
   getFlux,
   runFluxAction,
@@ -9,9 +9,9 @@ import {
   type FluxResource,
   type FluxSnapshot,
   type Overview,
-} from "./contracts";
-import { errorMessage, formatAge, STATUS, withAlpha, type Tokens } from "./theme.client";
-import { Banner, Button, Card, SearchField, StatTile } from "./ui.client";
+} from "../shared/contracts";
+import { errorMessage, formatAge, STATUS, withAlpha, type Tokens } from "./theme";
+import { Banner, Button, Card, SearchField, StatTile } from "./ui";
 
 /** Flux revisions look like `master@sha1:<40 hex>`; show the bit humans use. */
 function shortRevision(revision: string | null): string {

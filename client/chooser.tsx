@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useRpc } from "@getpaseo/plugin";
-import { checkTooling, type Overview, type ToolReport } from "./contracts";
-import { STATUS, withAlpha, type Tokens } from "./theme.client";
-import { Button, SectionLabel } from "./ui.client";
-import { RESOURCE_GLYPHS, RESOURCE_LABELS, type ResourceKind } from "./list.client";
+import { useRpc } from "@getpaseo/plugin/client";
+import { checkTooling, type Overview, type ToolReport } from "../shared/contracts";
+import { STATUS, withAlpha, type Tokens } from "./theme";
+import { Button, SectionLabel } from "./ui";
+import { RESOURCE_GLYPHS, RESOURCE_LABELS, type ResourceKind } from "./list";
 
 interface ChoiceMeta {
   kind: ResourceKind;
