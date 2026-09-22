@@ -1,7 +1,15 @@
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseYaml, type YamlValue } from "./yaml";
+
+/** Exec credential plugin (client.authentication.k8s.io) spec from a kubeconfig user. */
+export interface ExecCredentialSpec {
+  command: string;
+  args: string[];
+  env: { name: string; value: string }[];
+}
 
 export interface ClusterConnection {
   contextName: string;
@@ -15,6 +23,8 @@ export interface ClusterConnection {
   basicAuth?: string;
   servername?: string;
   insecure: boolean;
+  /** Set when the kubeconfig user has no static credentials but an exec plugin. */
+  exec?: ExecCredentialSpec;
 }
 
 export function expandHome(target: string): string {
@@ -145,14 +155,172 @@ export function loadConnection(kubeconfigPath: string, contextName: string | nul
   } else if (username && password) {
     connection.basicAuth = Buffer.from(`${username}:${password}`).toString("base64");
     connection.authMethod = "basic auth";
-  } else if (user.exec || user["auth-provider"]) {
+  } else if (user.exec) {
+    const spec = execSpecFrom(asRecord(user.exec), basedir);
+    if (!spec) {
+      throw new Error(
+        `Context "${resolvedContextName}" has an exec credential plugin with no command in ${resolved}.`,
+      );
+    }
+    connection.exec = spec;
+    connection.authMethod = "exec plugin";
+  } else if (user["auth-provider"]) {
     throw new Error(
-      `Context "${resolvedContextName}" uses an exec/auth-provider credential plugin, which this panel cannot run. ` +
-        "Point it at a kubeconfig with a service-account token or client certificate instead.",
+      `Context "${resolvedContextName}" uses an auth-provider (OIDC or similar), which this panel cannot run. ` +
+        "Point it at a kubeconfig with a token, client certificate, or exec credential plugin instead.",
     );
   } else {
     throw new Error(`Context "${resolvedContextName}" in ${resolved} has no usable credentials`);
   }
 
   return connection;
+}
+
+/** Extract a runnable exec credential plugin spec from a kubeconfig user. */
+function execSpecFrom(source: Record<string, YamlValue>, basedir: string): ExecCredentialSpec | null {
+  const command = asString(source.command);
+  if (!command) return null;
+  const args = Array.isArray(source.args)
+    ? source.args.flatMap((entry) => {
+        // The YAML reader types bare list items loosely; keep every scalar.
+        if (typeof entry === "string") return [entry];
+        if (typeof entry === "number" || typeof entry === "boolean") return [String(entry)];
+        return [];
+      })
+    : [];
+  const env = asList(source.env)
+    .map((entry) => ({ name: asString(entry.name) ?? "", value: asString(entry.value) ?? "" }))
+    .filter((entry) => entry.name !== "");
+  // A bare name goes through PATH like kubectl; anything path-like resolves
+  // against the kubeconfig's directory, matching the file credentials.
+  const resolvedCommand =
+    command.includes("/") || command.includes("\\") ? path.resolve(basedir, expandHome(command)) : command;
+  return { command: resolvedCommand, args, env };
+}
+
+interface ExecCredentialStatus {
+  token?: string | null;
+  clientCertificateData?: string | null;
+  clientKeyData?: string | null;
+  expirationTimestamp?: string | null;
+}
+
+interface CachedExecCredential {
+  token: string | null;
+  certPem: string | null;
+  keyPem: string | null;
+  expiresAtMs: number | null;
+}
+
+/** Re-run the plugin this far before the credential's stated expiry. */
+const EXEC_REFRESH_MARGIN_MS = 60_000;
+const EXEC_TIMEOUT_MS = 30_000;
+
+/**
+ * One entry per distinct plugin invocation (command, args, env, context), so
+ * two clusters sharing a kubeconfig each keep their own token. Tokens expire
+ * (EKS signs fifteen-minute credentials), so entries carry an expiry and are
+ * refreshed lazily on the next request that needs them.
+ */
+const execCredentialCache = new Map<string, CachedExecCredential>();
+
+function execCacheKey(connection: ClusterConnection): string {
+  const spec = connection.exec as ExecCredentialSpec;
+  return [
+    connection.contextName,
+    spec.command,
+    ...spec.args,
+    ...spec.env.map((entry) => `${entry.name}=${entry.value}`),
+  ].join("\u0000");
+}
+
+function runExecCredentialPlugin(spec: ExecCredentialSpec): Promise<ExecCredentialStatus> {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const entry of spec.env) env[entry.name] = entry.value;
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      spec.command,
+      spec.args,
+      { env, timeout: EXEC_TIMEOUT_MS, maxBuffer: 1_000_000 },
+      (error, stdout, stderr) => {
+        // Only stderr is quoted in errors: stdout carries the credential.
+        if (error) {
+          const exit = (error as { code?: number | string }).code;
+          const hint = (stderr ?? "").toString().trim().slice(0, 300);
+          reject(
+            new Error(
+              hint !== ""
+                ? `Exec credential plugin "${spec.command}" failed (${exit ?? "no exit code"}): ${hint}`
+                : `Exec credential plugin "${spec.command}" could not run: ${error.message}`,
+            ),
+          );
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          reject(new Error(`Exec credential plugin "${spec.command}" did not print usable JSON.`));
+          return;
+        }
+        const status =
+          parsed !== null && typeof parsed === "object" && "status" in parsed
+            ? asRecord((parsed as Record<string, YamlValue>).status)
+            : null;
+        if (!status) {
+          reject(new Error(`Exec credential plugin "${spec.command}" returned no status object.`));
+          return;
+        }
+        resolve({
+          token: asString(status.token),
+          clientCertificateData: asString(status.clientCertificateData),
+          clientKeyData: asString(status.clientKeyData),
+          expirationTimestamp: asString(status.expirationTimestamp),
+        });
+      },
+    );
+  });
+}
+
+function applyExecCredential(connection: ClusterConnection, credential: CachedExecCredential): void {
+  // Exec plugin status carries PEM directly, unlike the kubeconfig's
+  // base64-wrapped *-data fields.
+  if (credential.token !== null) {
+    connection.token = credential.token;
+  } else {
+    connection.cert = Buffer.from(credential.certPem ?? "", "utf8");
+    connection.key = Buffer.from(credential.keyPem ?? "", "utf8");
+  }
+}
+
+/**
+ * Ensure a connection whose kubeconfig user is an exec credential plugin has a
+ * usable bearer token (or client certificate), running the plugin only when no
+ * unexpired credential is cached. No-op for connections with static credentials.
+ */
+export async function resolveExecCredentials(connection: ClusterConnection): Promise<void> {
+  if (!connection.exec) return;
+  const spec = connection.exec;
+  const cacheKey = execCacheKey(connection);
+
+  const cached = execCredentialCache.get(cacheKey);
+  if (cached && (cached.expiresAtMs === null || Date.now() < cached.expiresAtMs - EXEC_REFRESH_MARGIN_MS)) {
+    applyExecCredential(connection, cached);
+    return;
+  }
+
+  const status = await runExecCredentialPlugin(spec);
+  const expiresAtMs = status.expirationTimestamp ? Date.parse(status.expirationTimestamp) : Number.NaN;
+  const credential: CachedExecCredential = {
+    token: status.token ?? null,
+    certPem: status.clientCertificateData ?? null,
+    keyPem: status.clientKeyData ?? null,
+    expiresAtMs: Number.isNaN(expiresAtMs) ? null : expiresAtMs,
+  };
+  if (credential.token === null && (credential.certPem === null || credential.keyPem === null)) {
+    throw new Error(`Exec credential plugin "${spec.command}" returned neither a token nor a client certificate.`);
+  }
+  execCredentialCache.set(cacheKey, credential);
+  applyExecCredential(connection, credential);
 }

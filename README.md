@@ -249,12 +249,15 @@ set up, it works with no configuration at all.
 ### Credentials
 
 Supported: bearer `token`, `tokenFile`, client certificate (`client-certificate-data`
-/ `client-key-data` or their file forms), and basic auth. `certificate-authority-data`,
-`tls-server-name` and `insecure-skip-tls-verify` are honoured.
+/ `client-key-data` or their file forms), basic auth, and `exec` credential plugins
+(`client.authentication.k8s.io`, e.g. `aws eks get-token`). Exec credentials are
+run per request, cached until a minute before their stated expiry, and re-run
+after that. `certificate-authority-data`, `tls-server-name` and
+`insecure-skip-tls-verify` are honoured.
 
-`exec` credential plugins and `auth-provider` are **not** supported — the panel does
-not run external binaries for credentials. Use a kubeconfig with a service-account
-token or a client certificate instead.
+`auth-provider` (OIDC and friends) is **not** supported — the panel cannot drive
+those exchanges. Use a kubeconfig with a token, client certificate, or exec
+credential plugin instead.
 
 Everything the panel does is a read (`GET` only), including `pods/log`. Kubernetes RBAC on the credential
 remains the authorization boundary; if the credential cannot list a resource the
