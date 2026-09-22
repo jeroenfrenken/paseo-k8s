@@ -27,7 +27,7 @@ export class ApiError extends Error {
 export async function apiGetText(connection: ClusterConnection, apiPath: string): Promise<string> {
   // Exec credential plugins are resolved per request: the cache inside makes
   // this a no-op for static credentials and for unexpired exec tokens.
-  await resolveExecCredentials(connection);
+  const invalidateCredential = await resolveExecCredentials(connection);
   const url = new URL(connection.server + apiPath);
   const secure = url.protocol === "https:";
   const transport = secure ? https : http;
@@ -59,6 +59,7 @@ export async function apiGetText(connection: ClusterConnection, apiPath: string)
           const body = Buffer.concat(chunks).toString("utf8");
           const status = response.statusCode ?? 0;
           if (status < 200 || status >= 300) {
+            if (status === 401) invalidateCredential?.();
             let detail = body.slice(0, 300);
             try {
               const parsed = JSON.parse(body) as StatusLike;
