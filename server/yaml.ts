@@ -180,6 +180,16 @@ function parseSequence(lines: Line[], start: number, indent: number): [YamlValue
       continue;
     }
 
+    // `- scalar` — a plain sequence entry with no `key: value` structure, as
+    // `exec` credential plugin args use. keyEnd finds no terminator, so it
+    // cannot go through the mapping path below.
+    const payload = after.trimStart();
+    if (keyEnd(payload) < 0) {
+      items.push(parseScalar(payload));
+      i++;
+      continue;
+    }
+
     // `- key: value` — re-emit the payload as a line indented to where it
     // actually starts, so sibling keys on following lines line up with it.
     const offset = 2 + (after.length - after.trimStart().length);
