@@ -249,12 +249,20 @@ set up, it works with no configuration at all.
 ### Credentials
 
 Supported: bearer `token`, `tokenFile`, client certificate (`client-certificate-data`
-/ `client-key-data` or their file forms), and basic auth. `certificate-authority-data`,
-`tls-server-name` and `insecure-skip-tls-verify` are honoured.
+/ `client-key-data` or their file forms), basic auth, and `exec` credential plugins
+(`client.authentication.k8s.io`, e.g. `aws eks get-token`). Exec credentials are
+resolved before requests, with concurrent requests sharing one plugin invocation.
+Credentials are cached until a minute before their stated expiry or until an API
+request returns HTTP 401; the next request then runs the plugin again. Without an
+expiry, credentials remain cached until HTTP 401 or a daemon restart.
+The plugin receives `KUBERNETES_EXEC_INFO` using its configured `v1` or `v1beta1`
+API version, with `interactive: false` and cluster information when requested.
+Plugins requiring `interactiveMode: Always` cannot run in the daemon. `certificate-authority-data`, `tls-server-name` and
+`insecure-skip-tls-verify` are honoured.
 
-`exec` credential plugins and `auth-provider` are **not** supported — the panel does
-not run external binaries for credentials. Use a kubeconfig with a service-account
-token or a client certificate instead.
+`auth-provider` (OIDC and friends) is **not** supported — the panel cannot drive
+those exchanges. Use a kubeconfig with a token, client certificate, or exec
+credential plugin instead.
 
 Everything the panel does is a read (`GET` only), including `pods/log`. Kubernetes RBAC on the credential
 remains the authorization boundary; if the credential cannot list a resource the
@@ -264,7 +272,7 @@ panel reports it under *Partial data* and shows the rest.
 
 ```sh
 npm install
-npm run check          # typecheck + client/server boundary
+npm run check          # typecheck + client/server boundary + regression tests
 paseo plugin reload k8s
 paseo plugin logs k8s
 ```

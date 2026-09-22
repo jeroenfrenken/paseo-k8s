@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
-import type { ClusterConnection } from "./kubeconfig";
+import { resolveExecCredentials, type ClusterConnection } from "./kubeconfig";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -24,7 +24,10 @@ export class ApiError extends Error {
 }
 
 /** GET a path on the API server and return the raw body. */
-export function apiGetText(connection: ClusterConnection, apiPath: string): Promise<string> {
+export async function apiGetText(connection: ClusterConnection, apiPath: string): Promise<string> {
+  // Exec credential plugins are resolved per request: the cache inside makes
+  // this a no-op for static credentials and for unexpired exec tokens.
+  const invalidateCredential = await resolveExecCredentials(connection);
   const url = new URL(connection.server + apiPath);
   const secure = url.protocol === "https:";
   const transport = secure ? https : http;
@@ -56,6 +59,7 @@ export function apiGetText(connection: ClusterConnection, apiPath: string): Prom
           const body = Buffer.concat(chunks).toString("utf8");
           const status = response.statusCode ?? 0;
           if (status < 200 || status >= 300) {
+            if (status === 401) invalidateCredential?.();
             let detail = body.slice(0, 300);
             try {
               const parsed = JSON.parse(body) as StatusLike;
