@@ -66,6 +66,7 @@ export function DetailDrawer({
   onRunCommand,
   onSelect,
   onShowPods,
+  onBack,
 }: {
   selection: Selection;
   overview: Overview;
@@ -78,6 +79,8 @@ export function DetailDrawer({
   onSelect: (key: string) => void;
   /** Show a workload's pods in the pod list. */
   onShowPods: (workload: Workload) => void;
+  /** Return to the resource this one was opened from; absent when there is none. */
+  onBack?: () => void;
 }) {
   const [asking, setAsking] = useState(false);
   const selectionKey =
@@ -121,6 +124,7 @@ export function DetailDrawer({
           borderBottomColor: tokens.border,
         }}
       >
+        {onBack ? <Button label="‹ Back" tokens={tokens} onPress={onBack} /> : null}
         <Text style={{ color: header.health.color, fontSize: 11, paddingTop: 3 }}>{header.health.glyph}</Text>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ color: tokens.ink, fontSize: 13, fontWeight: "600" }} numberOfLines={2}>
