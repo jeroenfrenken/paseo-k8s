@@ -93,6 +93,30 @@ export async function apiGet<T>(connection: ClusterConnection, apiPath: string):
   }
 }
 
+/** Items per request when paging a collection. */
+export const PAGE_SIZE = 500;
+/** Hard stop for runaway paging: 200 pages of 500 is 100k objects. */
+const MAX_PAGES = 200;
+
+/**
+ * List every item in a collection, following `metadata.continue` across pages.
+ * A single `limit=` request silently returns only the first page, which on a
+ * busy cluster hides every namespace past the first few hundred pods.
+ */
+export async function apiList<T>(connection: ClusterConnection, apiPath: string, pageSize = PAGE_SIZE): Promise<T[]> {
+  const separator = apiPath.includes("?") ? "&" : "?";
+  const items: T[] = [];
+  let token: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const query = `limit=${pageSize}${token ? `&continue=${encodeURIComponent(token)}` : ""}`;
+    const response = await apiGet<ListResponse<T>>(connection, `${apiPath}${separator}${query}`);
+    items.push(...(response.items ?? []));
+    token = response.metadata?.continue || undefined;
+    if (!token) return items;
+  }
+  throw new Error(`${apiPath}: more than ${MAX_PAGES * pageSize} items, listing stopped`);
+}
+
 /** Scope a collection path to one namespace, or leave it cluster-wide. */
 export function scoped(prefix: string, namespace: string | null, resource: string, query = ""): string {
   const base = namespace ? `${prefix}/namespaces/${encodeURIComponent(namespace)}/${resource}` : `${prefix}/${resource}`;
@@ -110,6 +134,7 @@ export interface ObjectMeta {
 
 export interface ListResponse<T> {
   items?: T[];
+  metadata?: { continue?: string };
 }
 
 export interface WorkloadResource {

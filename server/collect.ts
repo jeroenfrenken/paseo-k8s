@@ -12,6 +12,7 @@ import {
   ApiError,
   apiGet,
   apiGetText,
+  apiList,
   scoped,
   type EventResource,
   type ListResponse,
@@ -24,7 +25,6 @@ import {
 import { requireEnvironment } from "./config";
 import type { PodLogs } from "../shared/contracts";
 
-const LIST_LIMIT = 500;
 const EVENT_LIMIT = 40;
 /** Ceiling on a single log read, so a chatty container cannot flood the panel. */
 const LOG_LIMIT_BYTES = 256_000;
@@ -48,11 +48,8 @@ export async function fetchVersion(connection: ClusterConnection): Promise<strin
 }
 
 export async function fetchNamespaces(connection: ClusterConnection): Promise<string[]> {
-  const list = await apiGet<ListResponse<{ metadata?: { name?: string } }>>(
-    connection,
-    "/api/v1/namespaces?limit=500",
-  );
-  return (list.items ?? [])
+  const items = await apiList<{ metadata?: { name?: string } }>(connection, "/api/v1/namespaces");
+  return items
     .map((item) => item.metadata?.name)
     .filter((name): name is string => typeof name === "string")
     .sort((a, b) => a.localeCompare(b));
@@ -265,6 +262,91 @@ function selectorMatches(podLabels: Record<string, string>, matchLabels: Record<
 
 const HEALTH_ORDER: Record<Health, number> = { down: 0, degraded: 1, progressing: 2, unknown: 3, healthy: 4 };
 
+const WARNING_EVENTS = "fieldSelector=type%21%3DNormal";
+
+function podUsageByKey(metrics: MetricsResource[]): Map<string, { cpuMilli: number | null; memoryBytes: number | null }> {
+  const usage = new Map<string, { cpuMilli: number | null; memoryBytes: number | null }>();
+  for (const entry of metrics) {
+    const name = entry.metadata?.name;
+    const entryNamespace = entry.metadata?.namespace;
+    if (!name || !entryNamespace) continue;
+    const containers = entry.containers ?? [];
+    usage.set(`${entryNamespace}/${name}`, {
+      cpuMilli: sumNullable(containers.map((container) => parseCpuMilli(container.usage?.cpu))),
+      memoryBytes: sumNullable(containers.map((container) => parseMemoryBytes(container.usage?.memory))),
+    });
+  }
+  return usage;
+}
+
+function latestEvents(resources: EventResource[]): ClusterEvent[] {
+  return resources
+    .map((resource) => shapeEvent(resource))
+    .filter((event): event is ClusterEvent => event !== null)
+    .sort((a, b) => (b.lastSeen ?? "").localeCompare(a.lastSeen ?? ""))
+    .slice(0, EVENT_LIMIT);
+}
+
+const WORKLOAD_RESOURCES: Record<Workload["kind"], string> = {
+  Deployment: "deployments",
+  StatefulSet: "statefulsets",
+  DaemonSet: "daemonsets",
+};
+
+/**
+ * The pods and warning events of one workload, read live from its namespace
+ * with its own label selector. The cluster-wide overview is too coarse for a
+ * single workload: it pulls every pod in the cluster just to attribute a few.
+ */
+export async function fetchWorkloadPods(
+  connection: ClusterConnection,
+  workload: Pick<Workload, "kind" | "namespace" | "name">,
+): Promise<{ pods: Pod[]; events: ClusterEvent[] }> {
+  const namespace = encodeURIComponent(workload.namespace);
+  const resource = await apiGet<WorkloadResource>(
+    connection,
+    `/apis/apps/v1/namespaces/${namespace}/${WORKLOAD_RESOURCES[workload.kind]}/${encodeURIComponent(workload.name)}`,
+  );
+  const matchLabels = resource.spec?.selector?.matchLabels ?? {};
+  // Same rule as the overview: without matchLabels nothing is attributed,
+  // rather than an empty selector matching every pod in the namespace.
+  if (Object.keys(matchLabels).length === 0) return { pods: [], events: [] };
+
+  const selector = `labelSelector=${encodeURIComponent(
+    Object.entries(matchLabels)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(","),
+  )}`;
+  const [podResources, podMetrics, eventResources] = await Promise.all([
+    apiList<PodResource>(connection, scoped("/api/v1", workload.namespace, "pods", selector)),
+    apiList<MetricsResource>(connection, scoped("/apis/metrics.k8s.io/v1beta1", workload.namespace, "pods", selector))
+      .catch(() => [] as MetricsResource[]),
+    apiList<EventResource>(connection, scoped("/api/v1", workload.namespace, "events", WARNING_EVENTS))
+      .catch(() => [] as EventResource[]),
+  ]);
+
+  const usage = podUsageByKey(podMetrics);
+  const ownerKey = `${workload.kind}/${workload.namespace}/${workload.name}`;
+  const pods = podResources
+    .map((podResource) => shapePod(podResource))
+    .filter((pod): pod is Pod => pod !== null)
+    .map((pod) => ({
+      ...pod,
+      ownerKey,
+      cpuMilli: usage.get(pod.key)?.cpuMilli ?? null,
+      memoryBytes: usage.get(pod.key)?.memoryBytes ?? null,
+    }))
+    .sort((a, b) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health] || a.name.localeCompare(b.name));
+
+  const names = new Set(pods.map((pod) => pod.name));
+  const events = latestEvents(
+    eventResources.filter(
+      (event) => event.involvedObject?.kind === "Pod" && names.has(event.involvedObject.name ?? ""),
+    ),
+  );
+  return { pods, events };
+}
+
 export async function buildOverview(
   environmentId: EnvironmentId,
   namespace: string | null,
@@ -274,22 +356,19 @@ export async function buildOverview(
 
   async function list<T>(what: string, apiPath: string): Promise<T[]> {
     try {
-      const response = await apiGet<ListResponse<T>>(connection, apiPath);
-      return response.items ?? [];
+      return await apiList<T>(connection, apiPath);
     } catch (error) {
       warnings.push(`${what}: ${(error as Error).message}`);
       return [];
     }
   }
 
-  const limit = `limit=${LIST_LIMIT}`;
   // metrics-server and node listing are both optional: a namespace-scoped
   // credential will be refused, and the panel just hides those columns.
   let metricsAvailable = true;
   async function optional<T>(apiPath: string): Promise<T[]> {
     try {
-      const response = await apiGet<ListResponse<T>>(connection, apiPath);
-      return response.items ?? [];
+      return await apiList<T>(connection, apiPath);
     } catch {
       return [];
     }
@@ -311,42 +390,28 @@ export async function buildOverview(
       warnings.push(`version: ${error.message}`);
       return null;
     }),
-    list<WorkloadResource>("Deployments", scoped("/apis/apps/v1", namespace, "deployments", limit)),
-    list<WorkloadResource>("StatefulSets", scoped("/apis/apps/v1", namespace, "statefulsets", limit)),
-    list<WorkloadResource>("DaemonSets", scoped("/apis/apps/v1", namespace, "daemonsets", limit)),
-    list<PodResource>("Pods", scoped("/api/v1", namespace, "pods", limit)),
+    list<WorkloadResource>("Deployments", scoped("/apis/apps/v1", namespace, "deployments")),
+    list<WorkloadResource>("StatefulSets", scoped("/apis/apps/v1", namespace, "statefulsets")),
+    list<WorkloadResource>("DaemonSets", scoped("/apis/apps/v1", namespace, "daemonsets")),
+    list<PodResource>("Pods", scoped("/api/v1", namespace, "pods")),
     list<EventResource>(
       "Events",
-      scoped("/api/v1", namespace, "events", `fieldSelector=type%21%3DNormal&limit=${LIST_LIMIT}`),
+      scoped("/api/v1", namespace, "events", WARNING_EVENTS),
     ),
-    optional<NodeResource>(`/api/v1/nodes?${limit}`),
-    apiGet<ListResponse<MetricsResource>>(
-      connection,
-      scoped("/apis/metrics.k8s.io/v1beta1", namespace, "pods", limit),
-    )
-      .then((response) => response.items ?? [])
+    optional<NodeResource>("/api/v1/nodes"),
+    apiList<MetricsResource>(connection, scoped("/apis/metrics.k8s.io/v1beta1", namespace, "pods"))
       .catch(() => {
         metricsAvailable = false;
         return [] as MetricsResource[];
       }),
-    optional<MetricsResource>(`/apis/metrics.k8s.io/v1beta1/nodes?${limit}`),
+    optional<MetricsResource>("/apis/metrics.k8s.io/v1beta1/nodes"),
     // One cheap probe so the tab chooser can offer Flux, or explain its absence.
     apiGet<ListResponse<unknown>>(connection, "/apis/kustomize.toolkit.fluxcd.io/v1/kustomizations?limit=1")
       .then(() => true)
       .catch(() => false),
   ]);
 
-  const podUsage = new Map<string, { cpuMilli: number | null; memoryBytes: number | null }>();
-  for (const entry of podMetrics) {
-    const name = entry.metadata?.name;
-    const entryNamespace = entry.metadata?.namespace;
-    if (!name || !entryNamespace) continue;
-    const containers = entry.containers ?? [];
-    podUsage.set(`${entryNamespace}/${name}`, {
-      cpuMilli: sumNullable(containers.map((container) => parseCpuMilli(container.usage?.cpu))),
-      memoryBytes: sumNullable(containers.map((container) => parseMemoryBytes(container.usage?.memory))),
-    });
-  }
+  const podUsage = podUsageByKey(podMetrics);
 
   const sources: [Workload["kind"], WorkloadResource][] = [
     ...deployments.map((resource): [Workload["kind"], WorkloadResource] => ["Deployment", resource]),
@@ -412,11 +477,7 @@ export async function buildOverview(
     .filter((node): node is ClusterNode => node !== null)
     .sort((a, b) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health] || a.name.localeCompare(b.name));
 
-  const events = eventResources
-    .map((resource) => shapeEvent(resource))
-    .filter((event): event is ClusterEvent => event !== null)
-    .sort((a, b) => (b.lastSeen ?? "").localeCompare(a.lastSeen ?? ""))
-    .slice(0, EVENT_LIMIT);
+  const events = latestEvents(eventResources);
 
   workloads.sort(
     (a, b) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health] || a.name.localeCompare(b.name),

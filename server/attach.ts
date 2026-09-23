@@ -5,7 +5,7 @@ import {
   type PluginAttachmentItemLike,
   type Workload,
 } from "../shared/contracts";
-import { buildOverview, connectionFor, fetchPodLogs } from "./collect";
+import { buildOverview, connectionFor, fetchPodLogs, fetchWorkloadPods } from "./collect";
 import { listEnvironments } from "./config";
 
 const SNAPSHOT_TTL_MS = 20_000;
@@ -39,6 +39,28 @@ function snapshot(environmentId: EnvironmentId): Promise<Overview> {
   });
   cache.set(environmentId, { at: now, overview });
   return overview;
+}
+
+type WorkloadPods = Awaited<ReturnType<typeof fetchWorkloadPods>>;
+const workloadCache = new Map<string, { at: number; pods: Promise<WorkloadPods | null> }>();
+
+/**
+ * A workload's own pods and events, read from its namespace by its label
+ * selector. The snapshot is a cluster-wide sweep and is only a fallback here.
+ * Null on failure, so the caller falls back to the snapshot's attribution.
+ */
+function workloadPods(environmentId: EnvironmentId, workload: Workload): Promise<WorkloadPods | null> {
+  const key = `${environmentId}:${workload.key}`;
+  const existing = workloadCache.get(key);
+  const now = Date.now();
+  if (existing && now - existing.at < SNAPSHOT_TTL_MS) return existing.pods;
+
+  const pods = fetchWorkloadPods(connectionFor(environmentId).connection, workload).catch(() => {
+    workloadCache.delete(key);
+    return null;
+  });
+  workloadCache.set(key, { at: now, pods });
+  return pods;
 }
 
 function score(name: string, needle: string): number {
@@ -250,8 +272,12 @@ export async function searchAttachments(query: string): Promise<{ items: PluginA
         };
       }
 
-      const workload = candidate.workload!;
-      const ownPods = overview.pods
+      const live = await workloadPods(environmentId, candidate.workload!);
+      const context: Overview = live ? { ...overview, pods: live.pods, events: live.events } : overview;
+      const workload: Workload = live
+        ? { ...candidate.workload!, restarts: live.pods.reduce((sum, pod) => sum + pod.restarts, 0) }
+        : candidate.workload!;
+      const ownPods = context.pods
         .filter((pod) => pod.ownerKey === workload.key)
         .sort((left, right) => (LOG_PRIORITY[left.health] ?? 5) - (LOG_PRIORITY[right.health] ?? 5))
         .slice(0, WORKLOAD_LOG_PODS)
@@ -277,7 +303,7 @@ export async function searchAttachments(query: string): Promise<{ items: PluginA
           `${workload.ready}/${workload.desired}`,
         ].join(" · "),
         url: `${base}/apis/apps/v1/namespaces/${encodeURIComponent(workload.namespace)}/${workload.kind.toLowerCase()}s/${encodeURIComponent(workload.name)}`,
-        text: workloadText(workload, overview, logsByPod),
+        text: workloadText(workload, context, logsByPod),
         resourceType: "kubernetes-workload",
       };
     }),
