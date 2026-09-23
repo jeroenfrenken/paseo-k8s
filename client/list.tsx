@@ -9,6 +9,7 @@ import {
   STATUS,
   type Tokens,
 } from "./theme";
+import { podHaystack } from "./owner";
 
 export type ResourceKind =
   | "overview"
@@ -127,7 +128,7 @@ function podRows(items: Pod[], showUsage: boolean): TableModel {
     rows: items.map((item) => ({
       selectionKey: item.key,
       health: HEALTH_STYLE[item.health],
-      haystack: `${item.name} ${item.namespace} ${item.phase} ${item.reason ?? ""} ${item.node ?? ""}`.toLowerCase(),
+      haystack: podHaystack(item),
       cells: [
         item.name,
         item.namespace,

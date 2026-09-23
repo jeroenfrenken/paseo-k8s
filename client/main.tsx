@@ -9,6 +9,7 @@ import {
   type EnvironmentId,
   type Overview,
   type Pod,
+  type Workload,
 } from "../shared/contracts";
 import {
   errorMessage,
@@ -40,6 +41,7 @@ import {
 import { SettingsScreen } from "./settings";
 import { FirstRunScreen, TabChooser } from "./chooser";
 import { FluxPane } from "./flux";
+import { ownerQuery } from "./owner";
 
 const REFRESH_INTERVAL_MS = 20_000;
 const DRAWER_WIDTH = 340;
@@ -231,6 +233,19 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
   }, []);
 
   const commitDockHeight = useCallback((next: number) => setDockHeight(next), []);
+
+  // Reuse the first Pods tab rather than stacking a new one per workload.
+  const showWorkloadPods = useCallback(
+    (workload: Workload) => {
+      const existing = tabs.find((tab) => tab.kind === "pods");
+      const id = existing?.id ?? nextTabId("pods");
+      if (!existing) setTabs((current) => [...current, { id, kind: "pods" }]);
+      setQueries((current) => ({ ...current, [id]: ownerQuery(workload.key) }));
+      setActiveTabId(id);
+      setMode("browse");
+    },
+    [tabs],
+  );
 
   const addTab = useCallback((kind: ResourceKind) => {
     const id = nextTabId(kind);
@@ -541,6 +556,8 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
               onClose={() => setSelectedKey(null)}
               onOpenLogs={openLogs}
               onRunCommand={(command) => openShell(command)}
+              onSelect={setSelectedKey}
+              onShowPods={showWorkloadPods}
             />
           </View>
         ) : null}
