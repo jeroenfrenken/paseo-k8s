@@ -4,11 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import type { EnvironmentId, FluxKind, FluxResource, FluxSnapshot } from "../shared/contracts";
 import { connectionFor } from "./collect";
-import { apiGet, type ListResponse, type ObjectMeta } from "./k8s-api";
+import { apiList, type ObjectMeta } from "./k8s-api";
 import { expandHome } from "./kubeconfig";
 import { resolveBinary, runShellCommand } from "./exec";
 
-const LIST_LIMIT = 500;
 const GIT_TIMEOUT_MS = 10_000;
 const MAX_COMMITS = 20;
 
@@ -187,8 +186,8 @@ export async function buildFluxSnapshot(
   const groups = await Promise.all(
     FLUX_KINDS.map(async ({ kind, apiPath }) => {
       try {
-        const response = await apiGet<ListResponse<FluxObject>>(connection, `${apiPath}?limit=${LIST_LIMIT}`);
-        return (response.items ?? [])
+        const items = await apiList<FluxObject>(connection, apiPath);
+        return items
           .map((item) => shape(kind, item))
           .filter((item): item is FluxResource => item !== null);
       } catch (error) {

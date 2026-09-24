@@ -1,5 +1,5 @@
 import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ActivityIndicator, Animated, Pressable, ScrollView, Text, View } from "react-native";
 import {
   getConfig,
@@ -9,6 +9,7 @@ import {
   type EnvironmentId,
   type Overview,
   type Pod,
+  type Workload,
 } from "../shared/contracts";
 import {
   errorMessage,
@@ -40,6 +41,7 @@ import {
 import { SettingsScreen } from "./settings";
 import { FirstRunScreen, TabChooser } from "./chooser";
 import { FluxPane } from "./flux";
+import { ownerQuery } from "./owner";
 
 const REFRESH_INTERVAL_MS = 20_000;
 const DRAWER_WIDTH = 340;
@@ -86,6 +88,26 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
   const [activeTabId, setActiveTabId] = useState("overview-0");
   const [queries, setQueries] = useState<Record<string, string>>({});
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Keys the drawer navigated away from, so a pod opened from its workload can go back.
+  const [trail, setTrail] = useState<string[]>([]);
+  // Any selection that does not come from within the drawer starts a fresh trail.
+  const selectKey = useCallback((next: SetStateAction<string | null>) => {
+    setTrail([]);
+    setSelectedKey(next);
+  }, []);
+  const navigateTo = useCallback(
+    (key: string) => {
+      if (selectedKey) setTrail((current) => [...current, selectedKey]);
+      setSelectedKey(key);
+    },
+    [selectedKey],
+  );
+  const goBack = useCallback(() => {
+    const previous = trail[trail.length - 1];
+    if (!previous) return;
+    setTrail(trail.slice(0, -1));
+    setSelectedKey(previous);
+  }, [trail]);
 
   const [dockTabs, setDockTabs] = useState<DockTab[]>([]);
   const [activeDockId, setActiveDockId] = useState<string | null>(null);
@@ -119,7 +141,7 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
       config.environments.find((entry) => entry.kubeconfig !== "") ?? config.environments[0] ?? null;
     setEnvironmentId(preferred?.id ?? "");
     setNamespaceTouched(false);
-    setSelectedKey(null);
+    selectKey(null);
   }, [config, environmentId]);
 
   const environment = useMemo(
@@ -232,6 +254,19 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
 
   const commitDockHeight = useCallback((next: number) => setDockHeight(next), []);
 
+  // Reuse the first Pods tab rather than stacking a new one per workload.
+  const showWorkloadPods = useCallback(
+    (workload: Workload) => {
+      const existing = tabs.find((tab) => tab.kind === "pods");
+      const id = existing?.id ?? nextTabId("pods");
+      if (!existing) setTabs((current) => [...current, { id, kind: "pods" }]);
+      setQueries((current) => ({ ...current, [id]: ownerQuery(workload.key) }));
+      setActiveTabId(id);
+      setMode("browse");
+    },
+    [tabs],
+  );
+
   const addTab = useCallback((kind: ResourceKind) => {
     const id = nextTabId(kind);
     setTabs((current) => [...current, { id, kind }]);
@@ -297,7 +332,7 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
           selectedKey={selectedKey}
           tokens={tokens}
           compact={compact}
-          onSelect={(key) => setSelectedKey((current) => (current === key ? null : key))}
+          onSelect={(key) => selectKey((current) => (current === key ? null : key))}
           emptyLabel={`No ${RESOURCE_LABELS[activeTab.kind].toLowerCase()} in this scope.`}
         />
       </View>
@@ -366,7 +401,7 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
             onSelect={(value) => {
               setEnvironmentId(value as EnvironmentId);
               setNamespaceTouched(false);
-              setSelectedKey(null);
+              selectKey(null);
             }}
             tokens={tokens}
             title="Cluster"
@@ -495,7 +530,7 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
             onSelect={(value) => {
               setNamespaceTouched(true);
               setNamespace(value === "__all__" ? null : value);
-              setSelectedKey(null);
+              selectKey(null);
             }}
             tokens={tokens}
             title="Namespace"
@@ -538,9 +573,12 @@ export function KubernetesSurface({ theme, layout }: PluginSurfaceProps) {
               overview={overview}
               environmentId={environmentId}
               tokens={tokens}
-              onClose={() => setSelectedKey(null)}
+              onClose={() => selectKey(null)}
               onOpenLogs={openLogs}
               onRunCommand={(command) => openShell(command)}
+              onSelect={navigateTo}
+              onBack={trail.length > 0 ? goBack : undefined}
+              onShowPods={showWorkloadPods}
             />
           </View>
         ) : null}

@@ -10,6 +10,7 @@ import {
   STATUS,
   type Tokens,
 } from "./theme";
+import { Pressable } from "react-native";
 import { Button, Meter, StatTile } from "./ui";
 import { LaunchAgentPanel } from "./launch";
 import type { EnvironmentId } from "../shared/contracts";
@@ -63,6 +64,9 @@ export function DetailDrawer({
   onClose,
   onOpenLogs,
   onRunCommand,
+  onSelect,
+  onShowPods,
+  onBack,
 }: {
   selection: Selection;
   overview: Overview;
@@ -71,6 +75,12 @@ export function DetailDrawer({
   onClose: () => void;
   onOpenLogs: (pod: Pod) => void;
   onRunCommand: (command: string) => void;
+  /** Open another resource (a workload's pod, a pod's owner) in the drawer. */
+  onSelect: (key: string) => void;
+  /** Show a workload's pods in the pod list. */
+  onShowPods: (workload: Workload) => void;
+  /** Return to the resource this one was opened from; absent when there is none. */
+  onBack?: () => void;
 }) {
   const [asking, setAsking] = useState(false);
   const selectionKey =
@@ -114,6 +124,7 @@ export function DetailDrawer({
           borderBottomColor: tokens.border,
         }}
       >
+        {onBack ? <Button label="‹ Back" tokens={tokens} onPress={onBack} /> : null}
         <Text style={{ color: header.health.color, fontSize: 11, paddingTop: 3 }}>{header.health.glyph}</Text>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ color: tokens.ink, fontSize: 13, fontWeight: "600" }} numberOfLines={2}>
@@ -151,10 +162,19 @@ export function DetailDrawer({
             tokens={tokens}
             onOpenLogs={onOpenLogs}
             onRunCommand={onRunCommand}
+            onSelect={onSelect}
+            onShowPods={onShowPods}
           />
         ) : null}
         {selection.kind === "pod" ? (
-          <PodDetail pod={selection.item} tokens={tokens} onOpenLogs={onOpenLogs} onRunCommand={onRunCommand} />
+          <PodDetail
+            pod={selection.item}
+            owner={overview.workloads.find((workload) => workload.key === selection.item.ownerKey) ?? null}
+            tokens={tokens}
+            onOpenLogs={onOpenLogs}
+            onRunCommand={onRunCommand}
+            onSelect={onSelect}
+          />
         ) : null}
         {selection.kind === "node" ? (
           <NodeDetail node={selection.item} tokens={tokens} onRunCommand={onRunCommand} />
@@ -171,12 +191,16 @@ function WorkloadDetail({
   tokens,
   onOpenLogs,
   onRunCommand,
+  onSelect,
+  onShowPods,
 }: {
   workload: Workload;
   pods: Pod[];
   tokens: Tokens;
   onOpenLogs: (pod: Pod) => void;
   onRunCommand: (command: string) => void;
+  onSelect: (key: string) => void;
+  onShowPods: (workload: Workload) => void;
 }) {
   const ratio = workload.desired === 0 ? 0 : workload.ready / workload.desired;
   const health = HEALTH_STYLE[workload.health];
@@ -208,18 +232,27 @@ function WorkloadDetail({
       <Property label="Created" value={`${formatAge(workload.createdAt)} ago`} tokens={tokens} />
       <Property label="Images" value={workload.images.map(shortImage).join("\n") || "—"} tokens={tokens} />
 
-      <SectionTitle title={`Pods (${pods.length})`} tokens={tokens} />
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <SectionTitle title={`Pods (${pods.length})`} tokens={tokens} />
+        {pods.length > 0 ? <Button label="Show in Pods tab" tokens={tokens} onPress={() => onShowPods(workload)} /> : null}
+      </View>
       {pods.map((pod) => {
         const podHealth = HEALTH_STYLE[pod.health];
         return (
           <View key={pod.key} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Text style={{ color: podHealth.color, fontSize: 9 }}>{podHealth.glyph}</Text>
-            <Text style={{ color: tokens.ink, fontSize: 11, flex: 1 }} numberOfLines={1}>
-              {pod.name}
-            </Text>
-            <Text style={{ color: tokens.muted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
-              {pod.readyContainers}/{pod.totalContainers} · ↻{pod.restarts}
-            </Text>
+            <Pressable
+              onPress={() => onSelect(pod.key)}
+              style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}
+              accessibilityRole="link"
+            >
+              <Text style={{ color: podHealth.color, fontSize: 9 }}>{podHealth.glyph}</Text>
+              <Text style={{ color: tokens.accent, fontSize: 11, flex: 1 }} numberOfLines={1}>
+                {pod.name}
+              </Text>
+              <Text style={{ color: tokens.muted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
+                {pod.readyContainers}/{pod.totalContainers} · ↻{pod.restarts}
+              </Text>
+            </Pressable>
             <Button label="Logs" tokens={tokens} onPress={() => onOpenLogs(pod)} />
           </View>
         );
@@ -238,14 +271,18 @@ function WorkloadDetail({
 
 function PodDetail({
   pod,
+  owner,
   tokens,
   onOpenLogs,
   onRunCommand,
+  onSelect,
 }: {
   pod: Pod;
+  owner: Workload | null;
   tokens: Tokens;
   onOpenLogs: (pod: Pod) => void;
   onRunCommand: (command: string) => void;
+  onSelect: (key: string) => void;
 }) {
   const flag = `-n ${pod.namespace}`;
   return (
@@ -266,6 +303,16 @@ function PodDetail({
       <SectionTitle title="Properties" tokens={tokens} />
       <Property label="Phase" value={pod.reason ? `${pod.phase} · ${pod.reason}` : pod.phase} tokens={tokens} />
       <Property label="Namespace" value={pod.namespace} tokens={tokens} />
+      {owner ? (
+        <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+          <Text style={{ color: tokens.muted, fontSize: 11, width: 92 }}>Owner</Text>
+          <Pressable onPress={() => onSelect(owner.key)} style={{ flex: 1 }} accessibilityRole="link">
+            <Text style={{ color: tokens.accent, fontSize: 11 }}>
+              {owner.kind}/{owner.name}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
       <Property label="Node" value={pod.node ?? "—"} tokens={tokens} />
       <Property label="Containers" value={pod.containerNames.join(", ") || "—"} tokens={tokens} />
       <Property label="Created" value={`${formatAge(pod.createdAt)} ago`} tokens={tokens} />
